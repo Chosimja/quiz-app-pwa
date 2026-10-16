@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fbf8f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17151a" media="(prefers-color-scheme: dark)">
+<meta name="description" content="로컬 LLM이 만든 퀴즈 JSON을 불러와 푸는 앱">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<title>퀴즈 답안지</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;500;600&family=Noto+Serif+KR:wght@600;800&display=swap">
+<style>
+/* Layout: one narrow study column styled like an OMR answer card — pink ruled lines, pencil-filled bubbles */
+:root {
+  --paper: #fbf8f8;
+  --surface: #ffffff;
+  --ink: #1f2430;
+  --muted: #6d6470;
+  --line: #ecc5ca;
+  --line-strong: #d98f9a;
+  --accent: #2b3a8f;
+  --accent-soft: #e6e9f7;
+  --ok: #24785a;
+  --ok-soft: #e1f2ea;
+  --bad: #c0303f;
+  --bad-soft: #fbe6e8;
+  --warn: #8a5a00;
+  --warn-soft: #fbf0d9;
+  --display: "Noto Serif KR", "Nanum Myeongjo", serif;
+  --body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #17151a; --surface: #211e25; --ink: #ece7ea; --muted: #a79ea8;
+    --line: #4a3239; --line-strong: #7d4c56; --accent: #a7b5ff; --accent-soft: #272b44;
+    --ok: #6cc99d; --ok-soft: #1c3329; --bad: #ff8190; --bad-soft: #3b1f24;
+    --warn: #e8bb62; --warn-soft: #382c14; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #17151a; --surface: #211e25; --ink: #ece7ea; --muted: #a79ea8;
+  --line: #4a3239; --line-strong: #7d4c56; --accent: #a7b5ff; --accent-soft: #272b44;
+  --ok: #6cc99d; --ok-soft: #1c3329; --bad: #ff8190; --bad-soft: #3b1f24;
+  --warn: #e8bb62; --warn-soft: #382c14; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--body);
+  font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 48px;
+}
+.wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+header.top {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding-block: 20px 12px; border-bottom: 2px solid var(--line-strong);
+}
+.brand { font-family: var(--display); font-weight: 800; font-size: 22px; letter-spacing: -0.01em; cursor: pointer; }
+.brand small { font-family: var(--mono); font-weight: 400; font-size: 11px; color: var(--muted); letter-spacing: 0.08em; margin-left: 8px; }
+.top .set { font-size: 13px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+h1, h2 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.3; }
+h1 { font-size: 26px; font-weight: 800; }
+h2 { font-size: 18px; font-weight: 600; }
+.label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.muted { color: var(--muted); }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+button { font: inherit; cursor: pointer; }
+.btn {
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+  padding: 9px 16px; border-radius: 4px; font-weight: 500;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.btn.primary:hover { filter: brightness(1.1); color: var(--surface); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  border: 1px solid var(--line); background: transparent; color: var(--muted);
+  border-radius: 999px; padding: 2px 10px; font-size: 12px;
+}
+button.chip:hover { border-color: var(--accent); color: var(--accent); }
+.chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.stats div { padding: 10px 4px; display: flex; flex-direction: column; }
+.stats div + div { border-left: 1px solid var(--line); padding-left: 14px; }
+.stats b { font-family: var(--mono); font-size: 20px; font-variant-numeric: tabular-nums; }
+.checks { display: flex; flex-direction: column; gap: 6px; }
+.checks label { display: flex; gap: 8px; align-items: center; }
+.warns { border: 1px solid var(--warn); background: var(--warn-soft); color: var(--warn); border-radius: 4px; padding: 10px 14px; font-size: 13px; }
+.warns summary { cursor: pointer; font-weight: 600; }
+.warns ul { margin: 8px 0 0; padding-left: 18px; }
+.errs { border: 1px solid var(--bad); background: var(--bad-soft); color: var(--bad); border-radius: 4px; padding: 10px 14px; font-size: 13px; }
+.drop {
+  border: 2px dashed var(--line-strong); border-radius: 6px; padding: 24px 16px; text-align: center;
+  display: flex; flex-direction: column; gap: 8px; align-items: center; cursor: pointer;
+}
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+textarea {
+  width: 100%; min-height: 110px; font-family: var(--mono); font-size: 12px; padding: 10px;
+  border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); resize: vertical;
+}
+input[type="text"] {
+  width: 100%; font: inherit; padding: 10px 12px; border: 1px solid var(--line-strong);
+  border-radius: 4px; background: var(--paper); color: var(--ink);
+}
+/* quiz */
+.progress { display: flex; align-items: center; gap: 12px; }
+.bar { flex: 1; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); transition: width .25s; }
+.count { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.qhead { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center; }
+.qnum { font-family: var(--mono); font-weight: 600; color: var(--line-strong); font-size: 13px; letter-spacing: 0.06em; }
+.diff { display: inline-flex; gap: 3px; vertical-align: middle; }
+.diff i { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--muted); }
+.diff i.f { background: var(--muted); }
+.prompt { font-size: 18px; font-weight: 500; line-height: 1.55; overflow-wrap: anywhere; }
+.opts { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.opt {
+  display: flex; gap: 14px; align-items: center; text-align: left; width: 100%;
+  background: transparent; border: 0; border-bottom: 1px solid var(--line); color: var(--ink);
+  padding: 12px 6px; min-width: 0;
+}
+.opt:hover:not(:disabled) { background: var(--accent-soft); }
+.opt:disabled { cursor: default; }
+.opt .txt { min-width: 0; overflow-wrap: anywhere; }
+.bub {
+  flex: none; width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid var(--line-strong);
+  display: grid; place-items: center; font-family: var(--mono); font-size: 13px; color: var(--line-strong);
+}
+.opt.picked .bub { background: var(--ink); border-color: var(--ink); color: var(--surface); }
+.opt.right { background: var(--ok-soft); }
+.opt.right .bub { border-color: var(--ok); color: var(--ok); }
+.opt.right.picked .bub { background: var(--ok); color: var(--surface); }
+.opt.wrong { background: var(--bad-soft); }
+.opt.wrong .bub { background: var(--bad); border-color: var(--bad); color: var(--surface); }
+.ox { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ox .opt { justify-content: center; border: 1px solid var(--line); border-radius: 6px; padding: 18px 6px; font-size: 22px; font-family: var(--display); }
+.feedback { border-radius: 4px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.feedback.ok { background: var(--ok-soft); color: var(--ok); }
+.feedback.bad { background: var(--bad-soft); color: var(--bad); }
+.feedback p { margin: 0; color: var(--ink); }
+.keys { font-size: 12px; color: var(--muted); }
+kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line-strong); border-radius: 3px; padding: 0 5px; }
+/* result */
+.score { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.score b { font-family: var(--display); font-size: 52px; line-height: 1; }
+.score span { font-family: var(--mono); color: var(--muted); }
+.sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 8px; }
+.cell { display: flex; flex-direction: column; align-items: center; gap: 2px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.cell i { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--line-strong); }
+.cell.ok i { background: var(--ok); border-color: var(--ok); }
+.cell.bad i { background: var(--bad); border-color: var(--bad); }
+.tagrow { display: grid; grid-template-columns: minmax(0, 9em) minmax(0, 1fr) 4.5em; gap: 10px; align-items: center; font-size: 13px; }
+.tagrow .bar { height: 8px; }
+.tagrow .bar i { background: var(--ok); }
+.tagrow span:last-child { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.tagrow span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wrongitem { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 4px; }
+.wrongitem .a { font-size: 13px; }
+.wrongitem .a b { font-weight: 600; }
+.sample-tag { font-family: var(--mono); font-size: 11px; color: var(--warn); background: var(--warn-soft); padding: 1px 8px; border-radius: 3px; }
+@media (max-width: 480px) {
+  .prompt { font-size: 16px; }
+  .score b { font-size: 40px; }
+  .stats b { font-size: 17px; }
+}
+@media (pointer: coarse) { .keys { visibility: hidden; } .opt { padding-block: 15px; } }
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+</style>
+<style>
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand" id="brand" title="처음 화면">퀴즈 답안지<small>JSON QUIZ</small></div>
+    <div class="set" id="setName"></div>
+  </header>
+  <main id="app"></main>
+</div>
+<input type="file" id="fileIn" multiple hidden>
+
+<script>
+const SAMPLE = {"title":"2 장: 네트워크 구성 (2)","source":"데이터 통신_202609_01 분반_시험 및 퀴즈","questions":[{"id":"q1","type":"multiple_choice","prompt":"다음 중 토폴리기의 비로 전송되어 있는 노드와 링크의 집합을 의미하는 것은?","options":["네트워크","노드셋","포스포트","인터페이스"],"answer":1,"explanation":"노드와 링크의 집합은 노드셋 (Node Set) 이다.","tags":["토폴로지","기초"],"difficulty":1},{"id":"q2","type":"multiple_choice","prompt":"다음 중 네트워크 상의 컴퓨터와 하나나 여러 컴퓨터 간의 제어와 상호 작용을 관리하는 것은?","options":["프로토콜","디바이스","서버","포스포트"],"answer":0,"explanation":"프로토콜은 네트워크 통신 규칙과 제어 메커니즘을 정의한다.","tags":["프로토콜","기초"],"difficulty":1},{"id":"q3","type":"multiple_choice","prompt":"다음 프로토콜 중에서 각 노드간 데이터 전송으로 직접 연결하는 것은?","options":["그룹링","프로토콜","마스텔","포스"],"answer":1,"explanation":"프로토콜은 노드 간 직접 데이터 전송을 관리한다.","tags":["프로토콜","전송"],"difficulty":2},{"id":"q4","type":"multiple_choice","prompt":"다음 프로토콜 중에서 중앙 제어와 노드 간 관리와 책임을 가지고 통신하는 방식은?","options":["그룹링","프로토콜","명령","마스텔"],"answer":1,"explanation":"프로토콜은 중앙 제어를 포함한 노드 간 통신 규칙을 정의한다.","tags":["중앙 제어","통신"],"difficulty":2},{"id":"q5","type":"multiple_choice","prompt":"다음 중 네트워크 전송하기 위해 사용되는 신호로 변조되어 하는 것은?","options":["고주파 전압파","인터페이스","포스","노드"],"answer":0,"explanation":"고주파 전압파는 데이터 전송을 위한 신호로 사용된다.","tags":["신호","변조"],"difficulty":1},{"id":"q6","type":"multiple_choice","prompt":"다음 중 데이터의 전송과 가장 영향을 많이 받는 전송 매체는?","options":["동축 케이블","ISP 케이블","광케이블","WiFi 케이블"],"answer":0,"explanation":"동축 케이블은 간섭에 민감하여 데이터 전송에 영향이 큼.","tags":["전송 매체","간섭"],"difficulty":2},{"id":"q7","type":"multiple_choice","prompt":"다음 중 TCP/IP 프로토콜이 독립적으로 없는 것은?","options":["비트바이트 포스 사용한다","파워프로토콜로 데이터를 전송한다","비트바이트로 전송과 전송을 하고 있다","네트워크가 인터넷 연결을 위해 모두 없어도"],"answer":3,"explanation":"TCP/IP 는 네트워크 연결에 필수적이며 모든 요소가 필요하다.","tags":["TCP/IP","프로토콜"],"difficulty":3},{"id":"q8","type":"multiple_choice","prompt":"중앙제어를 구성하는 구성 요소와 같은 역할의 수행하여 방출 방식으로 하는 것은?","options":["OSI(7 계)","프로토콜(protocol)","MAC 어드레스","프로토콜(protocol)"],"answer":1,"explanation":"프로토콜은 중앙제어 구성 요소로 역할 수행.","tags":["중앙 제어","프로토콜"],"difficulty":2},{"id":"q9","type":"multiple_choice","prompt":"동축 케이블의 테스트 및 제어의 결과보다 더 안정적이고 더 연결하는 하는 요소는?","options":["안장중심","외부 노드","내부 노드","외부 노드의 기능"],"answer":3,"explanation":"외부 노드의 기능이 더 안정적인 연결을 보장한다.","tags":["동축 케이블","연결"],"difficulty":2},{"id":"q10","type":"multiple_choice","prompt":"다음 중 네트워크 보안에 가장 위험한 전송 매체는?","options":["ISP 케이블","프로토콜","동축 케이블","WiFi 케이블"],"answer":3,"explanation":"WiFi 케이블은 무선 통신으로 보안이 취약할 수 있다.","tags":["네트워크 보안","전송 매체"],"difficulty":2},{"id":"q11","type":"multiple_choice","prompt":"다음 중 무선 통신 스택에서 가장 발전하는 기준은?","options":["통신장치","단추","스위치"],"answer":0,"explanation":"통신장비가 무선 통신 시스템의 기본 요소다.","tags":["무선 통신","기기"],"difficulty":1},{"id":"q12","type":"multiple_choice","prompt":"신호가 채널을 통해 전달될 때 지연시간이 없고 대역폭의 특성을 가진 전송 매체는?","options":["동축 케이블과 광케이블","광케이블과 동축","광케이블"],"answer":0,"explanation":"동축 케이블과 광케이블은 낮은 지연과 높은 대역폭을 제공한다.","tags":["전송 매체","대역폭"],"difficulty":2},{"id":"q13","type":"boolean","prompt":"신호의 세기는 전송체계를 통과하는 거리에 비례하여 증가한다.","answer":false,"explanation":"거리에 반비례하여 감소한다 (감쇠 현상).","tags":["신호 전파","거리"],"difficulty":1},{"id":"q14","type":"multiple_choice","prompt":"6 개의 노드를 포함한 그룹형(Mesh) 네트워크의 접속 형태로 구성된다면, 이 때 필요한 최소한의 링크 수는 몇 개인가?","options":["15","25"],"answer":0,"explanation":"Mesh 네트워크에서 n 개 노드일 때 최소 링크 수 = n(n-1)/2 = 6×5/2 = 15","tags":["Mesh 네트워크","링크 계산"],"difficulty":3}]};
+
+const STORE_KEY = "quiz-answer-sheet:v1";
+const BUBBLES = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨"];
+const TYPE_NAMES = { multiple_choice: "객관식", boolean: "OX", short_answer: "단답형" };
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+
+/* ---------- storage ---------- */
+function loadStore() { try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; } }
+function saveStore(s) { try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch {} }
+let store = loadStore();
+store.stats = store.stats || {};
+
+/* ---------- parsing & validation ---------- */
+function extractJSON(text) {
+  let t = String(text).trim().replace(/^﻿/, "");
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) t = fence[1].trim();
+  try { return JSON.parse(t); } catch (e) {
+    const a = t.indexOf("{"), b = t.lastIndexOf("}");
+    if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch {} }
+    throw new Error("JSON으로 읽을 수 없습니다. 괄호나 쉼표가 빠졌는지 확인하세요. (" + e.message + ")");
+  }
+}
+
+function toBool(v) {
+  if (typeof v === "boolean") return v;
+  const s = String(v).trim().toLowerCase();
+  if (["true","o","참","맞음","yes","1"].includes(s)) return true;
+  if (["false","x","거짓","틀림","no","0"].includes(s)) return false;
+  return null;
+}
+
+function normalizeSet(data, prefix = "") {
+  if (Array.isArray(data)) data = { questions: data };
+  if (!data || !Array.isArray(data.questions)) throw new Error('"questions" 배열이 없습니다.');
+  const errors = [], warnings = [], questions = [], seen = new Set();
+  data.questions.forEach((raw, i) => {
+    const n = i + 1;
+    let id = String(raw?.id ?? "q" + n);
+    if (seen.has(id)) { warnings.push(`${n}번: id "${id}"가 중복되어 "${id}-${n}"로 바꿨습니다.`); id = id + "-" + n; }
+    seen.add(id);
+    const label = `${n}번(${id})`;
+    if (!raw || typeof raw.prompt !== "string" || !raw.prompt.trim()) { errors.push(`${label}: 문제 문장(prompt)이 없어 건너뜁니다.`); return; }
+    let type = raw.type || (Array.isArray(raw.options) ? "multiple_choice" : "short_answer");
+    if (type === "ox" || type === "true_false") type = "boolean";
+    const q = {
+      id: prefix + id, type, prompt: raw.prompt.trim(),
+      explanation: raw.explanation ? String(raw.explanation) : "",
+      tags: Array.isArray(raw.tags) ? raw.tags.map(String) : [],
+      difficulty: Number.isFinite(+raw.difficulty) ? Math.max(0, Math.min(5, Math.round(+raw.difficulty))) : 0,
+    };
+    if (type === "multiple_choice") {
+      if (!Array.isArray(raw.options) || raw.options.length < 2) { errors.push(`${label}: 보기가 2개 미만이라 건너뜁니다.`); return; }
+      q.options = raw.options.map(String);
+      let ans = raw.answer;
+      if (typeof ans === "string" && !/^\d+$/.test(ans)) ans = q.options.indexOf(ans);
+      ans = Number(ans);
+      if (!Number.isInteger(ans) || ans < 0 || ans >= q.options.length) { errors.push(`${label}: 정답 번호(answer)가 보기 범위를 벗어나 건너뜁니다. 정답은 0부터 세는 번호여야 합니다.`); return; }
+      q.answer = ans;
+      const dup = q.options.map((o, k) => q.options.indexOf(o) !== k ? k + 1 : 0).filter(Boolean);
+      if (dup.length) warnings.push(`${label}: 같은 보기가 반복됩니다 (${dup.join(", ")}번째 보기).`);
+      if (q.options.length < 3) warnings.push(`${label}: 보기가 ${q.options.length}개뿐입니다.`);
+    } else if (type === "boolean") {
+      const b = toBool(raw.answer);
+      if (b === null) { errors.push(`${label}: OX 문제의 정답이 true/false가 아니라 건너뜁니다.`); return; }
+      q.answer = b;
+    } else if (type === "short_answer") {
+      if (raw.answer == null || String(raw.answer).trim() === "") { errors.push(`${label}: 단답형 정답(answer)이 없어 건너뜁니다.`); return; }
+      q.answer = String(raw.answer);
+      q.keywords = Array.isArray(raw.keywords) ? raw.keywords.map(String).filter(Boolean) : [];
+    } else { errors.push(`${label}: 지원하지 않는 문제 유형 "${esc(type)}"이라 건너뜁니다.`); return; }
+    if (!q.explanation) warnings.push(`${label}: 해설이 없습니다.`);
+    questions.push(q);
+  });
+  return { title: String(data.title || "제목 없는 퀴즈"), source: String(data.source || ""), questions, errors, warnings };
+}
+
+/* ---------- state ---------- */
+let quiz = null;        // normalized set
+let isSample = false;
+let loadErr = "";
+const opts = { shuffleQ: false, shuffleO: false, wrongOnly: false, tags: new Set() };
+let session = null;
+
+function statKey(q) { return quiz.title + "::" + q.id; }
+function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+function setQuiz(set, raw, sample = false) {
+  quiz = set; isSample = sample; loadErr = ""; opts.tags.clear(); opts.wrongOnly = false;
+  if (!sample && raw) { store.last = raw; saveStore(store); }
+  session = null;
+  renderHome();
+}
+
+function loadTexts(items) {
+  // items: [{name, text}]
+  try {
+    if (items.length === 1) {
+      const set = normalizeSet(extractJSON(items[0].text));
+      if (!set.questions.length) throw new Error("읽을 수 있는 문제가 하나도 없습니다.\n" + set.errors.join("\n"));
+      setQuiz(set, items[0].text);
+    } else {
+      const merged = { title: `${items.length}개 세트 합본`, source: items.map(i => i.name).join(", "), questions: [], errors: [], warnings: [] };
+      const raws = [];
+      items.forEach((it, k) => {
+        const s = normalizeSet(extractJSON(it.text), `f${k + 1}-`);
+        merged.questions.push(...s.questions);
+        merged.errors.push(...s.errors.map(e => `[${it.name}] ${e}`));
+        merged.warnings.push(...s.warnings.map(e => `[${it.name}] ${e}`));
+        raws.push(extractJSON(it.text));
+      });
+      if (!merged.questions.length) throw new Error("읽을 수 있는 문제가 하나도 없습니다.");
+      const rawMerged = JSON.stringify({ title: merged.title, source: merged.source, questions: raws.flatMap((r, k) => (Array.isArray(r) ? r : r.questions).map(q => ({ ...q, id: `f${k + 1}-${q.id ?? ""}` }))) });
+      setQuiz(merged, rawMerged);
+    }
+  } catch (e) { loadErr = e.message; renderHome(); }
+}
+
+async function readFiles(fileList) {
+  const items = await Promise.all([...fileList].map(f => f.text().then(text => ({ name: f.name, text }))));
+  if (items.length) loadTexts(items);
+}
+
+/* ---------- home ---------- */
+function filteredPool() {
+  let pool = quiz.questions;
+  if (opts.tags.size) pool = pool.filter(q => q.tags.some(t => opts.tags.has(t)));
+  if (opts.wrongOnly) pool = pool.filter(q => (store.stats[statKey(q)]?.last === false));
+  return pool;
+}
+
+function renderHome() {
+  $("#setName").textContent = quiz ? quiz.title : "";
+  const app = $("#app");
+  let html = "";
+  if (loadErr) html += `<div class="errs" role="alert"><b>파일을 불러오지 못했습니다.</b><br>${esc(loadErr).replace(/\n/g, "<br>")}</div>`;
+  if (quiz) {
+    const types = {};
+    quiz.questions.forEach(q => types[q.type] = (types[q.type] || 0) + 1);
+    const tags = [...new Set(quiz.questions.flatMap(q => q.tags))];
+    const lastWrong = quiz.questions.filter(q => store.stats[statKey(q)]?.last === false).length;
+    const pool = filteredPool();
+    html += `<section class="panel">
+      <div class="row" style="justify-content:space-between">
+        <span class="label">불러온 세트</span>${isSample ? '<span class="sample-tag">예시 파일</span>' : ""}
+      </div>
+      <div><h1>${esc(quiz.title)}</h1>${quiz.source ? `<div class="muted" style="font-size:13px;margin-top:4px">${esc(quiz.source)}</div>` : ""}</div>
+      <div class="stats">
+        <div><span class="label">문항</span><b>${quiz.questions.length}</b></div>
+        <div><span class="label">유형</span><b style="font-size:14px;font-family:var(--body);font-weight:500">${Object.entries(types).map(([t, n]) => `${TYPE_NAMES[t]} ${n}`).join(" · ")}</b></div>
+        <div><span class="label">지난번 오답</span><b>${lastWrong}</b></div>
+      </div>
+      ${tags.length ? `<div style="display:flex;flex-direction:column;gap:6px"><span class="label">태그로 고르기 ${opts.tags.size ? "" : "· 전체"}</span>
+        <div class="chips">${tags.map(t => `<button class="chip ${opts.tags.has(t) ? "on" : ""}" data-tag="${esc(t)}">${esc(t)}</button>`).join("")}</div></div>` : ""}
+      <div class="checks">
+        <label><input type="checkbox" id="optShuffleQ" ${opts.shuffleQ ? "checked" : ""}> 문항 순서 섞기</label>
+        <label><input type="checkbox" id="optShuffleO" ${opts.shuffleO ? "checked" : ""}> 보기 순서 섞기</label>
+        <label><input type="checkbox" id="optWrong" ${opts.wrongOnly ? "checked" : ""} ${lastWrong ? "" : "disabled"}> 지난번에 틀린 문제만 ${lastWrong ? "" : '<span class="muted">(기록 없음)</span>'}</label>
+      </div>
+      ${quiz.errors.length ? `<div class="errs"><b>${quiz.errors.length}개 문항을 건너뛰었습니다.</b><ul style="margin:6px 0 0;padding-left:18px">${quiz.errors.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>` : ""}
+      ${quiz.warnings.length ? `<details class="warns"><summary>확인이 필요한 문항 ${quiz.warnings.length}건</summary><ul>${quiz.warnings.map(w => `<li>${esc(w)}</li>`).join("")}</ul></details>` : ""}
+      <div class="row">
+        <button class="btn primary" id="startBtn" ${pool.length ? "" : "disabled"}>${pool.length}문항 풀기</button>
+      </div>
+    </section>`;
+  }
+  html += `<section class="panel">
+    <div><h2>${quiz ? "다른 파일 불러오기" : "퀴즈 파일 불러오기"}</h2>
+    <div class="muted" style="font-size:13px">로컬 LLM이 만든 JSON 파일을 올리세요. 여러 파일을 한꺼번에 고르면 하나로 합쳐집니다.</div></div>
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="파일 선택">
+      <b>파일을 끌어다 놓거나 눌러서 선택</b>
+      <span class="muted" style="font-size:12px">.json · .txt (코드 블록으로 감싼 출력도 됩니다)</span>
+    </div>
+    <details><summary class="muted" style="cursor:pointer;font-size:13px">LLM 출력 붙여넣기</summary>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+        <textarea id="pasteBox" placeholder='{ "title": "...", "questions": [ ... ] }'></textarea>
+        <div class="row"><button class="btn" id="pasteBtn">붙여넣은 내용 불러오기</button>
+        ${isSample ? "" : '<button class="btn" id="sampleBtn">예시 세트 열기</button>'}</div>
+      </div>
+    </details>
+  </section>`;
+  app.innerHTML = html;
+
+  $("#drop").onclick = () => $("#fileIn").click();
+  $("#drop").onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#fileIn").click(); } };
+  const drop = $("#drop");
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); readFiles(e.dataTransfer.files); };
+  $("#pasteBtn").onclick = () => { const t = $("#pasteBox").value; if (t.trim()) loadTexts([{ name: "붙여넣기", text: t }]); };
+  $("#sampleBtn") && ($("#sampleBtn").onclick = () => setQuiz(normalizeSet(SAMPLE), null, true));
+  if (quiz) {
+    document.querySelectorAll("[data-tag]").forEach(b => b.onclick = () => {
+      const t = b.dataset.tag; opts.tags.has(t) ? opts.tags.delete(t) : opts.tags.add(t); renderHome();
+    });
+    $("#optShuffleQ").onchange = e => opts.shuffleQ = e.target.checked;
+    $("#optShuffleO").onchange = e => opts.shuffleO = e.target.checked;
+    $("#optWrong").onchange = e => { opts.wrongOnly = e.target.checked; renderHome(); };
+    $("#startBtn").onclick = () => startSession(filteredPool());
+  }
+}
+
+/* ---------- quiz ---------- */
+function startSession(pool) {
+  const list = opts.shuffleQ ? shuffle(pool) : pool.slice();
+  session = {
+    items: list.map(q => ({
+      q,
+      order: q.type === "multiple_choice" ? (opts.shuffleO ? shuffle(q.options.map((_, i) => i)) : q.options.map((_, i) => i)) : null,
+      given: undefined, correct: undefined,
+    })),
+    idx: 0,
+  };
+  renderQuestion();
+}
+
+function gradeShort(q, text) {
+  const norm = s => s.toLowerCase().replace(/\s+/g, "");
+  const t = norm(text);
+  if (!t) return false;
+  if (t === norm(q.answer)) return true;
+  if (q.keywords.length) {
+    const hit = q.keywords.filter(k => t.includes(norm(k))).length;
+    return hit >= Math.ceil(q.keywords.length * 0.6);
+  }
+  return false;
+}
+
+function answerCurrent(given) {
+  const it = session.items[session.idx];
+  if (it.given !== undefined) return;
+  const q = it.q;
+  it.given = given;
+  if (q.type === "multiple_choice") it.correct = given === q.answer;
+  else if (q.type === "boolean") it.correct = given === q.answer;
+  else it.correct = gradeShort(q, given);
+  recordStat(it);
+  renderQuestion();
+}
+
+function recordStat(it) {
+  const k = statKey(it.q);
+  const s = store.stats[k] || { r: 0, w: 0 };
+  it.correct ? s.r++ : s.w++;
+  s.last = it.correct;
+  store.stats[k] = s; saveStore(store);
+}
+
+function overrideCorrect() {
+  const it = session.items[session.idx];
+  if (it.correct) return;
+  const s = store.stats[statKey(it.q)];
+  if (s) { s.w = Math.max(0, s.w - 1); s.r++; s.last = true; saveStore(store); }
+  it.correct = true;
+  renderQuestion();
+}
+
+function next() {
+  if (session.idx < session.items.length - 1) { session.idx++; renderQuestion(); }
+  else renderResult();
+}
+
+function diffDots(d) { if (!d) return ""; return `<span class="diff" title="난이도 ${d}">${[1,2,3].map(i => `<i class="${i <= d ? "f" : ""}"></i>`).join("")}</span>`; }
+
+function renderQuestion() {
+  const it = session.items[session.idx], q = it.q, done = it.given !== undefined;
+  const total = session.items.length, n = session.idx + 1;
+  let body = "";
+  if (q.type === "multiple_choice") {
+    body = `<div class="opts">${it.order.map((orig, pos) => {
+      let cls = "";
+      if (done) {
+        if (orig === q.answer) cls += " right";
+        if (orig === it.given) cls += " picked" + (orig === q.answer ? "" : " wrong");
+      }
+      return `<button class="opt${cls}" data-pick="${orig}" ${done ? "disabled" : ""}><span class="bub">${BUBBLES[pos] || pos + 1}</span><span class="txt">${esc(q.options[orig])}</span></button>`;
+    }).join("")}</div>`;
+  } else if (q.type === "boolean") {
+    body = `<div class="ox">${[true, false].map(v => {
+      let cls = "";
+      if (done) { if (v === q.answer) cls += " right"; if (v === it.given && v !== q.answer) cls += " wrong"; }
+      return `<button class="opt${cls}" data-bool="${v}" ${done ? "disabled" : ""}>${v ? "O" : "X"}</button>`;
+    }).join("")}</div>`;
+  } else {
+    body = `<form id="saForm" class="row" style="flex-wrap:nowrap">
+      <input type="text" id="saInput" autocomplete="off" placeholder="답을 입력하세요" value="${done ? esc(it.given) : ""}" ${done ? "disabled" : ""}>
+      ${done ? "" : '<button class="btn primary" type="submit">제출</button>'}
+    </form>`;
+  }
+  let fb = "";
+  if (done) {
+    const ansText = q.type === "multiple_choice" ? `${BUBBLES[it.order.indexOf(q.answer)]} ${q.options[q.answer]}` : q.type === "boolean" ? (q.answer ? "O" : "X") : q.answer;
+    fb = `<div class="feedback ${it.correct ? "ok" : "bad"}" role="status">
+      <b>${it.correct ? "정답입니다" : "틀렸습니다"}${it.correct ? "" : ` · 정답: ${esc(ansText)}`}</b>
+      ${q.explanation ? `<p>${esc(q.explanation)}</p>` : ""}
+      ${q.type === "short_answer" && q.keywords.length ? `<p class="muted" style="font-size:13px">채점 키워드: ${q.keywords.map(esc).join(", ")}</p>` : ""}
+    </div>
+    <div class="row">
+      <button class="btn primary" id="nextBtn">${n < total ? "다음 문제" : "결과 보기"}</button>
+      ${q.type === "short_answer" && !it.correct ? '<button class="btn" id="overBtn">맞은 걸로 처리</button>' : ""}
+    </div>`;
+  }
+  $("#app").innerHTML = `<section class="panel">
+    <div class="progress"><div class="bar"><i style="width:${(session.idx + (done ? 1 : 0)) / total * 100}%"></i></div><span class="count">${n} / ${total}</span></div>
+    <div class="qhead"><span class="qnum">문항 ${String(n).padStart(2, "0")} · ${TYPE_NAMES[q.type]} ${diffDots(q.difficulty)}</span>
+      <div class="chips">${q.tags.map(t => `<span class="chip">${esc(t)}</span>`).join("")}</div></div>
+    <div class="prompt">${esc(q.prompt)}</div>
+    ${body}
+    ${fb}
+    <div class="row" style="justify-content:space-between">
+      <span class="keys">${q.type === "multiple_choice" ? "<kbd>1</kbd>–<kbd>" + q.options.length + "</kbd> 선택 · " : q.type === "boolean" ? "<kbd>O</kbd> <kbd>X</kbd> 선택 · " : ""}<kbd>Enter</kbd> 다음</span>
+      <button class="btn" id="quitBtn" style="padding:5px 12px;font-size:13px">그만 풀고 채점</button>
+    </div>
+  </section>`;
+
+  document.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => answerCurrent(+b.dataset.pick));
+  document.querySelectorAll("[data-bool]").forEach(b => b.onclick = () => answerCurrent(b.dataset.bool === "true"));
+  const f = $("#saForm");
+  if (f) { f.onsubmit = e => { e.preventDefault(); const v = $("#saInput").value; if (v.trim()) answerCurrent(v.trim()); }; if (!done) $("#saInput").focus(); }
+  $("#nextBtn") && ($("#nextBtn").onclick = next) && $("#nextBtn").focus();
+  $("#overBtn") && ($("#overBtn").onclick = overrideCorrect);
+  $("#quitBtn").onclick = renderResult;
+}
+
+document.addEventListener("keydown", e => {
+  if (!session || !$("#quitBtn")) return;
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  const it = session.items[session.idx];
+  if (it.given !== undefined) { if (e.key === "Enter" && document.activeElement?.id !== "nextBtn") { e.preventDefault(); next(); } return; }
+  if (it.q.type === "multiple_choice" && /^[1-9]$/.test(e.key)) { const p = +e.key - 1; if (p < it.order.length) answerCurrent(it.order[p]); }
+  if (it.q.type === "boolean") { const k = e.key.toLowerCase(); if (k === "o") answerCurrent(true); if (k === "x") answerCurrent(false); }
+});
+
+/* ---------- result ---------- */
+function renderResult() {
+  const answered = session.items.filter(i => i.given !== undefined);
+  const right = answered.filter(i => i.correct).length;
+  const pct = answered.length ? Math.round(right / answered.length * 100) : 0;
+  const tagStat = {};
+  answered.forEach(i => i.q.tags.forEach(t => { tagStat[t] = tagStat[t] || [0, 0]; tagStat[t][1]++; if (i.correct) tagStat[t][0]++; }));
+  const tagRows = Object.entries(tagStat).sort((a, b) => a[1][0] / a[1][1] - b[1][0] / b[1][1]);
+  const wrong = answered.filter(i => !i.correct);
+  const ansText = (q, v, order) => q.type === "multiple_choice" ? `${BUBBLES[order.indexOf(v)] || ""} ${q.options[v]}` : q.type === "boolean" ? (v ? "O" : "X") : v;
+
+  $("#app").innerHTML = `<section class="panel">
+    <span class="label">채점 결과</span>
+    <div class="score"><b>${right} / ${answered.length}</b><span>${pct}%${answered.length < session.items.length ? ` · ${session.items.length - answered.length}문항 안 풂` : ""}</span></div>
+    <div class="sheet" aria-label="답안지">${session.items.map((i, k) => `<div class="cell ${i.given === undefined ? "" : i.correct ? "ok" : "bad"}" title="${esc(i.q.id)}"><i></i>${k + 1}</div>`).join("")}</div>
+    <div class="row">
+      <button class="btn primary" id="retryWrong" ${wrong.length ? "" : "disabled"}>틀린 ${wrong.length}문항 다시 풀기</button>
+      <button class="btn" id="retryAll">처음부터 다시</button>
+      <button class="btn" id="homeBtn">세트 화면으로</button>
+    </div>
+  </section>
+  ${tagRows.length ? `<section class="panel"><h2>태그별 정답률</h2>
+    <div style="display:flex;flex-direction:column;gap:8px">${tagRows.map(([t, [r, n]]) => `<div class="tagrow"><span title="${esc(t)}">${esc(t)}</span><div class="bar"><i style="width:${r / n * 100}%"></i></div><span>${r}/${n}</span></div>`).join("")}</div>
+  </section>` : ""}
+  ${wrong.length ? `<section class="panel"><h2>오답 노트</h2>${wrong.map(i => `<div class="wrongitem">
+      <span class="qnum">${esc(i.q.id)} · ${TYPE_NAMES[i.q.type]}</span>
+      <div style="font-weight:500;overflow-wrap:anywhere">${esc(i.q.prompt)}</div>
+      <div class="a" style="color:var(--bad)"><b>내 답</b> ${esc(ansText(i.q, i.given, i.order))}</div>
+      <div class="a" style="color:var(--ok)"><b>정답</b> ${esc(ansText(i.q, i.q.answer, i.order))}</div>
+      ${i.q.explanation ? `<div class="a muted">${esc(i.q.explanation)}</div>` : ""}
+    </div>`).join("")}</section>` : ""}`;
+
+  $("#retryWrong").onclick = () => startSession(wrong.map(i => i.q));
+  $("#retryAll").onclick = () => startSession(session.items.map(i => i.q));
+  $("#homeBtn").onclick = () => { session = null; renderHome(); };
+}
+
+/* ---------- boot ---------- */
+$("#fileIn").onchange = e => { readFiles(e.target.files); e.target.value = ""; };
+$("#brand").onclick = () => { if (quiz) { session = null; renderHome(); } };
+(function boot() {
+  if (store.last) { try { const s = normalizeSet(extractJSON(store.last)); if (s.questions.length) { quiz = s; isSample = false; renderHome(); return; } } catch {} }
+  quiz = normalizeSet(SAMPLE); isSample = true; renderHome();
+})();
+</script>
+
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
+}
+</script>
+</body>
+</html>
